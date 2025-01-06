@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SQL Server to PostgreSQL Converter</title>
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>SQL Server to PostgreSQL Converter</h1>
+      <div>
+        <textarea
+          id="sqlInput"
+          rows="10"
+          placeholder="Paste SQL Server code here..."
+        ></textarea>
+      </div>
+      <button id="convertBtn">Convert to PostgreSQL</button>
+      <div>
+        <h3>Converted Code:</h3>
+        <textarea
+          id="sqlOutput"
+          rows="10"
+          readonly
+          placeholder="Converted PostgreSQL code will appear here..."
+        ></textarea>
+      </div>
+    </div>
+    <script src="index.js"></script>
+  </body>
+</html>
