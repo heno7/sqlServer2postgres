@@ -1,3 +1,8 @@
+document.getElementById('clearBtn').addEventListener('click', function () {
+    document.getElementById('sqlInput').value = '';
+    document.getElementById('sqlOutput').value = '';
+});
+
 document.getElementById("convertBtn").addEventListener("click", function () {
     let sqlInput = document.getElementById("sqlInput").value;
     let sqlOutput = document.getElementById("sqlOutput");
@@ -64,19 +69,21 @@ function handleDmlStatements(sql) {
 }
 
 function handleDeleteStatements(sql) {
-    // Handle DELETE without FROM (direct deletion from a single table)
-    sql = sql.replace(/\bdelete (\S+)\b/gi, 'DELETE FROM $1');
+    // Handle DELETE without FROM (SQL Server allows this; PostgreSQL requires FROM)
+    // Example: DELETE test -> DELETE FROM test
+    sql = sql.replace(/\bdelete\s+(\S+)(\s+where|\s*$)/gi, 'DELETE FROM $1$2');
 
     // Handle DELETE with FROM (complex DELETE with joins or subqueries)
-    sql = sql.replace(/\bdelete (\S+)\s+from\s+(\S+)\s+/gi, 'DELETE FROM $2 USING $3 WHERE $2.$1 = $3.$1');
+    // Example: DELETE e FROM employees e INNER JOIN departments d ON e.department_id = d.department_id
+    sql = sql.replace(/\bdelete\s+(\S+)\s+from\s+(\S+)/gi, 'DELETE FROM $2 USING $2 WHERE $1');
 
-    // Handle DELETE with OUTPUT DELETED clause (SQL Server to PostgreSQL RETURNING)
-    sql = sql.replace(/\bdelete from (\S+)\s+output deleted\.(\w+)\s+where/gi, function (match, table, column) {
-        return `DELETE FROM ${table} WHERE RETURNING ${column};`;
-    });
+    // Handle DELETE with OUTPUT (SQL Server) to RETURNING (PostgreSQL)
+    // Example: DELETE FROM employees OUTPUT deleted.id -> DELETE FROM employees RETURNING id
+    sql = sql.replace(/\bdelete from (\S+)\s+output deleted\.(\w+)/gi, 'DELETE FROM $1 RETURNING $2');
 
     return sql;
 }
+
 
 function handleDataTypes(sql) {
     // SQL Server to PostgreSQL Data Type Conversion
