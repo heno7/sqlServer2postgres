@@ -84,40 +84,52 @@ function handleDeleteStatements(sql) {
     return sql;
 }
 
-
 function handleDataTypes(sql) {
-    // SQL Server to PostgreSQL Data Type Conversion
-    const dataTypeMap = {
-        'int': 'INTEGER',
-        'smallint': 'SMALLINT',
-        'bigint': 'BIGINT',
-        'varchar': 'TEXT',
-        'nvarchar': 'TEXT',
-        'char': 'CHAR',
-        'nchar': 'CHAR',
-        'datetime': 'TIMESTAMP',
-        'date': 'DATE',
-        'time': 'TIME',
-        'bit': 'BOOLEAN',
-        'decimal': 'NUMERIC',
-        'float': 'DOUBLE PRECISION',
-        'money': 'MONEY',
-        'uniqueidentifier': 'UUID',
-        'text': 'TEXT',
-        'image': 'BYTEA',
-        'binary': 'BYTEA',
-        'varbinary': 'BYTEA',
-        'real': 'REAL',
-        'timestamp': 'TIMESTAMP'
-    };
+    // CHAR(n), NCHAR(n)
+    sql = sql.replace(/\bNCHAR\s*\(\s*(\d+)\s*\)/gi, 'CHAR($1)');
+    sql = sql.replace(/\bCHAR\s*\(\s*(\d+)\s*\)/gi, 'CHAR($1)');
 
-    Object.keys(dataTypeMap).forEach(function (key) {
-        const regex = new RegExp(`\\b${key}\\b`, 'gi');
-        sql = sql.replace(regex, dataTypeMap[key]);
+    // NTEXT, NVARCHAR(n), NVARCHAR(MAX)
+    sql = sql.replace(/\bNTEXT\b/gi, 'TEXT');
+    sql = sql.replace(/\bNVARCHAR\s*\(\s*(\d+)\s*\)/gi, 'VARCHAR($1)');
+    sql = sql.replace(/\bNVARCHAR\s*\(MAX\)/gi, 'TEXT');
+
+    // TEXT, VARCHAR(n), VARCHAR(MAX)
+    sql = sql.replace(/\bTEXT\b/gi, 'TEXT');
+    sql = sql.replace(/\bVARCHAR\s*\(\s*(\d+)\s*\)/gi, 'VARCHAR($1)');
+    sql = sql.replace(/\bVARCHAR\s*\(MAX\)/gi, 'TEXT');
+
+    // FLOAT(p), SMALLMONEY, TINYINT
+    sql = sql.replace(/\bFLOAT\s*\(\s*(\d+)\s*\)/gi, (match, p) => {
+        return parseInt(p) > 24 ? 'DOUBLE PRECISION' : 'REAL';
     });
+    sql = sql.replace(/\bSMALLMONEY\b/gi, 'MONEY');
+    sql = sql.replace(/\bTINYINT\b/gi, 'SMALLINT');
+
+    // DATETIME, DATETIME2(p), DATETIMEOFFSET(p), SMALLDATETIME
+    sql = sql.replace(/\bDATETIME\b/gi, 'TIMESTAMP');
+    sql = sql.replace(/\bDATETIME2\s*\(\s*(\d+)\s*\)/gi, 'TIMESTAMP($1)');
+    sql = sql.replace(/\bDATETIMEOFFSET\s*\(\s*(\d+)\s*\)/gi, 'TIMESTAMP($1) WITH TIME ZONE');
+    sql = sql.replace(/\bSMALLDATETIME\b/gi, 'TIMESTAMP(0)');
+
+    // BINARY(n), VARBINARY(n), VARBINARY(MAX)
+    sql = sql.replace(/\bBINARY\s*\(\s*(\d+)\s*\)/gi, 'BYTEA');
+    sql = sql.replace(/\bVARBINARY\s*\(\s*(\d+)\s*\)/gi, 'BYTEA');
+    sql = sql.replace(/\bVARBINARY\s*\(MAX\)/gi, 'BYTEA');
+
+    // BIT, IMAGE, ROWVERSION, TIMESTAMP
+    sql = sql.replace(/\bBIT\b/gi, 'BOOLEAN');
+    sql = sql.replace(/\bIMAGE\b/gi, 'BYTEA');
+    sql = sql.replace(/\bROWVERSION\b/gi, 'BYTEA');
+    // sql = sql.replace(/\bTIMESTAMP\b/gi, 'BYTEA');
+
+    // UNIQUEIDENTIFIER
+    sql = sql.replace(/\bUNIQUEIDENTIFIER\b/gi, 'UUID');
 
     return sql;
 }
+
+
 
 function handleFunctions(sql) {
     // SQL Server to PostgreSQL Built-in Function Conversion
