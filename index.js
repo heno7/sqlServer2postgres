@@ -18,14 +18,20 @@ function convertSql(sql) {
         return match.toUpperCase();
     });
 
-    // Handle DML Statements
-    sql = handleDmlStatements(sql);
+    // Handle Identifiers
+    sql = handleIdentifiers(sql);
+
+    // Handle Language Elements
+    sql = handleLanguageElements(sql);
 
     // Handle Data Type Conversion
     sql = handleDataTypes(sql);
 
+    // Handle DML Statements
+    sql = handleDmlStatements(sql);
+
     // Handle Built-in Function Conversion
-    sql = handleFunctions(sql);
+    sql = handleBuiltInFunctions(sql);
 
     // Handle Table Management
     sql = sql.replace(/\bcreate table\b/gi, 'CREATE TABLE');
@@ -51,6 +57,35 @@ function convertSql(sql) {
 
     // Handle Functions, Stored Procedures, and Triggers (Basic placeholders for now)
     sql = handleFunctionsAndStoredProcedures(sql);
+
+    return sql;
+}
+
+function handleIdentifiers(sql) {
+    // Convert temporary tables (#table) to PostgreSQL format
+    sql = sql.replace(/^#(\w+)/g, 'temp_$1');
+
+    // Quote identifiers with special characters
+    sql = sql.replace(/(\b\w*#\w*\b)/g, '"$1"');
+
+    sql = sql.replace(/\[([^\]]+)\]/g, '$1');
+
+    return sql;
+}
+
+function handleLanguageElements(sql) {
+    // Convert single-quoted aliases to double-quoted aliases
+    sql = sql.replace(/\bAS\s+'([^']+)'/gi, 'AS "$1"');
+    sql = sql.replace(/(\w+)\s+'([^']+)'/gi, '$1 AS "$2"');
+
+    // Convert single-quoted aliases without AS keyword to double-quoted aliases
+    sql = sql.replace(/(\w+)\s+'([^']+)'/gi, '$1 AS "$2"');
+
+    // Convert single-quoted strings followed by single-quoted aliases without AS keyword
+    sql = sql.replace(/'([^']+)' '([^']+)'/gi, "'$1' \"$2\"");
+
+    // Convert @@ROWCOUNT to ROW_COUNT
+    sql = sql.replace(/@@ROWCOUNT/gi, 'ROW_COUNT');
 
     return sql;
 }
@@ -131,34 +166,79 @@ function handleDataTypes(sql) {
 
 
 
-function handleFunctions(sql) {
-    // SQL Server to PostgreSQL Built-in Function Conversion
-    const functionMap = {
-        'GETDATE()': 'CURRENT_TIMESTAMP',
-        'GETUTCDATE()': 'CURRENT_TIMESTAMP',
-        'SYSDATETIME()': 'CURRENT_TIMESTAMP',
-        'LEN()': 'LENGTH()',
-        'ISNULL()': 'COALESCE()',
-        'ISNULL': 'COALESCE',
-        'GETDATE': 'CURRENT_TIMESTAMP',
-        'DATEADD': 'DATE + INTERVAL',
-        'DATEDIFF': 'DATE_PART',
-        'NEWID()': 'UUID_GENERATE_V4()',
-        'CAST': 'CAST',
-        'CONVERT': 'CAST',
-        'GETDATE': 'CURRENT_TIMESTAMP',
-        'CHARINDEX': 'POSITION',
-        'REPLACE': 'REPLACE',
-        'SUBSTRING': 'SUBSTRING'
-    };
+function handleBuiltInFunctions(sql) {
+    // Call the string functions handler
+    sql = handleStringFunctions(sql);
 
-    Object.keys(functionMap).forEach(function (key) {
-        const regex = new RegExp(`\\b${key}\\b`, 'gi');
-        sql = sql.replace(regex, functionMap[key]);
-    });
+    // Future: Call other categories of built-in functions handlers here (e.g., date functions, aggregate functions)
 
     return sql;
 }
+
+function handleStringFunctions(sql) {
+    // CHAR and NCHAR
+    sql = sql.replace(/\bCHAR\s*\(\s*(.*?)\s*\)/gi, 'CHR($1)');
+    sql = sql.replace(/\bNCHAR\s*\(\s*(.*?)\s*\)/gi, 'CHR($1)');
+
+    // CHARINDEX with and without optional start position
+    sql = sql.replace(/\bCHARINDEX\s*\(\s*'([^']+)'\s*,\s*'([^']+)'(?:\s*,\s*(\d+))?\s*\)/gi, (match, expressionToFind, expressionToSearch, startLocation) => {
+        if (startLocation) {
+            return `POSITION('${expressionToFind}' IN SUBSTRING('${expressionToSearch}' FROM ${startLocation})) + (${startLocation} - 1)`;
+        } else {
+            return `POSITION('${expressionToFind}' IN '${expressionToSearch}')`;
+        }
+    });
+
+    // CONCAT
+    sql = sql.replace(/\bCONCAT\s*\((.*?)\)/gi, 'CONCAT($1)');
+
+    // CONVERT for VARCHAR(datetime, style)
+    sql = sql.replace(/\bCONVERT\s*\(\s*VARCHAR\s*,\s*(.*?),\s*(\d+)\s*\)/gi, (match, datetime, style) => {
+        // Handle style to format mapping
+        const styleToFormat = {
+            '101': 'MM/DD/YYYY',
+            '102': 'YYYY.MM.DD',
+            '103': 'DD/MM/YYYY',
+            '120': 'YYYY-MM-DD HH24:MI:SS'
+        };
+        return `TO_CHAR(${datetime}, '${styleToFormat[style] || 'YYYY-MM-DD HH24:MI:SS'}')`;
+    });
+
+    // LEFT
+    sql = sql.replace(/\bLEFT\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'SUBSTRING($1 FROM 1 FOR $2)');
+
+    // LEN
+    sql = sql.replace(/\bLEN\s*\(\s*(.*?)\s*\)/gi, 'LENGTH($1)');
+
+    // PATINDEX (approximation using POSITION)
+    sql = sql.replace(/\bPATINDEX\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'POSITION($1 IN $2)');
+
+    // REPLICATE
+    sql = sql.replace(/\bREPLICATE\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'REPEAT($1, $2)');
+
+    // REVERSE
+    sql = sql.replace(/\bREVERSE\s*\(\s*(.*?)\s*\)/gi, 'REVERSE($1)');
+
+    // STR
+    sql = sql.replace(/\bSTR\s*\(\s*(.*?),\s*(\d+),\s*(\d+)\s*\)/gi, (match, num, length, decimals) => {
+        const format = `'FM${'0'.repeat(length - decimals - 1)}.${'0'.repeat(decimals)}'`;
+        return `TO_CHAR(${num}, ${format})`;
+    });
+
+    // STRING_AGG
+    sql = sql.replace(/\bSTRING_AGG\s*\((.*?),\s*(.*?)\s*\)/gi, 'STRING_AGG($1, $2)');
+
+    // STRING_SPLIT
+    sql = sql.replace(/\bSTRING_SPLIT\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'STRING_TO_ARRAY($1, $2)');
+
+    // SUBSTRING
+    sql = sql.replace(/\bSUBSTRING\s*\(\s*(.*?),\s*(.*?),\s*(.*?)\s*\)/gi, 'SUBSTRING($1 FROM $2 FOR $3)');
+
+    return sql;
+}
+
+
+
 
 function handleFunctionsAndStoredProcedures(sql) {
     // Example: Handling SQL Server to PostgreSQL function conversion
@@ -177,3 +257,4 @@ function handleFunctionsAndStoredProcedures(sql) {
 
     return sql;
 }
+
