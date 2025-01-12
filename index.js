@@ -18,6 +18,9 @@ function convertSql(sql) {
         return match.toUpperCase();
     });
 
+    // Handle Built-in Function Conversion
+    sql = handleBuiltInFunctions(sql);
+
     // Handle Identifiers
     sql = handleIdentifiers(sql);
 
@@ -29,9 +32,6 @@ function convertSql(sql) {
 
     // Handle DML Statements
     sql = handleDmlStatements(sql);
-
-    // Handle Built-in Function Conversion
-    sql = handleBuiltInFunctions(sql);
 
     // Handle Table Management
     sql = sql.replace(/\bcreate table\b/gi, 'CREATE TABLE');
@@ -170,14 +170,22 @@ function handleBuiltInFunctions(sql) {
     // Call the string functions handler
     sql = handleStringFunctions(sql);
 
+    // Call the date/time functions handler
+    sql = handleDateTimeFunctions(sql);
     // Future: Call other categories of built-in functions handlers here (e.g., date functions, aggregate functions)
 
     return sql;
 }
 
 function handleStringFunctions(sql) {
-    // CHAR and NCHAR
+    // CHAR 
     sql = sql.replace(/\bCHAR\s*\(\s*(.*?)\s*\)/gi, 'CHR($1)');
+
+    // NCHAR (convert hex like 0x20AC to decimal for PostgreSQL)
+    sql = sql.replace(/\bNCHAR\s*\(\s*0x([0-9A-Fa-f]+)\s*\)/gi, (match, hex) => {
+        const decimalValue = parseInt(hex, 16);
+        return `CHR(${decimalValue})`;
+    });
     sql = sql.replace(/\bNCHAR\s*\(\s*(.*?)\s*\)/gi, 'CHR($1)');
 
     // CHARINDEX with and without optional start position
@@ -204,11 +212,8 @@ function handleStringFunctions(sql) {
         return `TO_CHAR(${datetime}, '${styleToFormat[style] || 'YYYY-MM-DD HH24:MI:SS'}')`;
     });
 
-    // LEFT
-    sql = sql.replace(/\bLEFT\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'SUBSTRING($1 FROM 1 FOR $2)');
-
     // LEN
-    sql = sql.replace(/\bLEN\s*\(\s*(.*?)\s*\)/gi, 'LENGTH($1)');
+    sql = sql.replace(/\bLEN\s*\(\s*(.*?)\s*\)/gi, 'LENGTH(RTRIM($1))');
 
     // PATINDEX (approximation using POSITION)
     sql = sql.replace(/\bPATINDEX\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'POSITION($1 IN $2)');
@@ -220,8 +225,14 @@ function handleStringFunctions(sql) {
     sql = sql.replace(/\bREVERSE\s*\(\s*(.*?)\s*\)/gi, 'REVERSE($1)');
 
     // STR
-    sql = sql.replace(/\bSTR\s*\(\s*(.*?),\s*(\d+),\s*(\d+)\s*\)/gi, (match, num, length, decimals) => {
-        const format = `'FM${'0'.repeat(length - decimals - 1)}.${'0'.repeat(decimals)}'`;
+    sql = sql.replace(/\bSTR\s*\(\s*(.*?),\s*(\d+)(?:\s*,\s*(\d+))?\s*\)/gi, (match, num, length, decimals) => {
+        const totalLength = parseInt(length, 10);
+        const decimalPlaces = decimals ? parseInt(decimals, 10) : 0;
+
+        // Create the PostgreSQL TO_CHAR format string
+        const integerPartLength = totalLength - (decimalPlaces > 0 ? decimalPlaces + 1 : 0);
+        const format = `'FM${'9'.repeat(integerPartLength)}${decimalPlaces > 0 ? '.' + '9'.repeat(decimalPlaces) : ''}'`;
+
         return `TO_CHAR(${num}, ${format})`;
     });
 
@@ -229,16 +240,112 @@ function handleStringFunctions(sql) {
     sql = sql.replace(/\bSTRING_AGG\s*\((.*?),\s*(.*?)\s*\)/gi, 'STRING_AGG($1, $2)');
 
     // STRING_SPLIT
-    sql = sql.replace(/\bSTRING_SPLIT\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'STRING_TO_ARRAY($1, $2)');
-
-    // SUBSTRING
-    sql = sql.replace(/\bSUBSTRING\s*\(\s*(.*?),\s*(.*?),\s*(.*?)\s*\)/gi, 'SUBSTRING($1 FROM $2 FOR $3)');
+    sql = sql.replace(/\bSTRING_SPLIT\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, (match, string, delimiter) => {
+        return `UNNEST(string_to_array(${string}, ${delimiter}))`;
+    });
 
     return sql;
 }
 
+function handleDateTimeFunctions(sql) {
+    // CONVERT(DATETIME, expr, style)
+    sql = sql.replace(/\bCONVERT\s*\(\s*DATETIME\s*,\s*(.*?),\s*(\d+)\s*\)/gi, (match, expr, style) => {
+        const styleToFormat = {
+            '101': 'MM/DD/YYYY',
+            '102': 'YYYY.MM.DD',
+            '103': 'DD/MM/YYYY',
+            '112': 'YYYYMMDD',
+            '110': 'MM/DD/YYYY HH24:MI:SS',
+            '120': 'YYYY-MM-DD HH24:MI:SS',
+        };
+        return `TO_TIMESTAMP(${expr}, '${styleToFormat[style] || 'YYYY-MM-DD HH24:MI:SS'}')`;
+    });
 
+    // CURRENT_TIMESTAMP
+    sql = sql.replace(/\bCURRENT_TIMESTAMP\b/gi, 'CURRENT_TIMESTAMP');
 
+    // CONVERT(TIME, expr)
+    sql = sql.replace(/\bCONVERT\s*\(\s*TIME\s*,\s*(.*?)\s*\)/gi, 'TO_CHAR($1, \'HH24:MI:SS\')');
+
+    // DATEADD(unit, number, date)
+    sql = sql.replace(/\bDATEADD\s*\(\s*([a-zA-Z_]+)\s*,\s*([^,]+)\s*,\s*(.+?)\)\s*/gi, (match, unit, number, date) => {
+        console.log(date);
+
+        const unitMapping = {
+            'YEAR': 'year', 'Y': 'year', 'YY': 'year', 'YYYY': 'year',
+            'MONTH': 'month', 'MM': 'month', 'M': 'month',
+            'DAY': 'day', 'DD': 'day', 'D': 'day',
+            'MINUTE': 'minute', 'MI': 'minute', 'N': 'minute',
+            'SECOND': 'second', 'SS': 'second', 'S': 'second'
+        };
+        return `(${date} + INTERVAL '${number} ${unitMapping[unit.toUpperCase()] || unit}')`;
+    });
+
+    // DATEDIFF(units, start, end)
+    sql = sql.replace(/\bDATEDIFF\s*\(\s*(\w+)\s*,\s*(.*?)\s*,\s*(.*?)\s*\)/gi, (match, units, start, end) => {
+        const unitMapping = {
+            'YEAR': 'YEAR', 'MONTH': 'MONTH', 'DAY': 'DAY',
+            'HOUR': 'HOUR', 'MINUTE': 'MINUTE', 'SECOND': 'SECOND',
+        };
+        return `EXTRACT(EPOCH FROM (${end} - ${start})) / ${getSecondsInUnit(unitMapping[units.toUpperCase()] || units)}`;
+    });
+
+    // DATEDIFF_BIG(units, start, end)
+    sql = sql.replace(/\bDATEDIFF_BIG\s*\(\s*(\w+)\s*,\s*(.*?)\s*,\s*(.*?)\s*\)/gi, (match, units, start, end) => {
+        const unitMapping = {
+            'YEAR': 'YEAR', 'MONTH': 'MONTH', 'DAY': 'DAY',
+            'HOUR': 'HOUR', 'MINUTE': 'MINUTE', 'SECOND': 'SECOND',
+        };
+        return `EXTRACT(EPOCH FROM (${end} - ${start})) / ${getSecondsInUnit(unitMapping[units.toUpperCase()] || units)}`;
+    });
+
+    // DATENAME(unit, datetime)
+    sql = sql.replace(/\bDATENAME\s*\(\s*(\w+)\s*,\s*(.*?)\s*\)/gi, (match, unit, datetime) => {
+        const unitMapping = {
+            'YEAR': 'YYYY', 'MONTH': 'Month', 'DAY': 'DD',
+            'HOUR': 'HH24', 'MINUTE': 'MI', 'SECOND': 'SS'
+        };
+        return `TO_CHAR(${datetime}, '${unitMapping[unit.toUpperCase()] || unit}')`;
+    });
+
+    // DATEPART(unit, datetime)
+    sql = sql.replace(/\bDATEPART\s*\(\s*(\w+)\s*,\s*(.*?)\s*\)/gi, (match, unit, datetime) => {
+        const unitMapping = {
+            'YEAR': 'YEAR', 'MONTH': 'MONTH', 'DAY': 'DAY',
+            'HOUR': 'HOUR', 'MINUTE': 'MINUTE', 'SECOND': 'SECOND'
+        };
+        return `EXTRACT(${unitMapping[unit.toUpperCase()] || unit} FROM ${datetime})`;
+    });
+
+    // DAY(datetime)
+    sql = sql.replace(/\bDAY\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(DAY FROM $1)');
+
+    // GETDATE()
+    sql = sql.replace(/\bGETDATE\s*\(\s*\)/gi, 'NOW()');
+
+    // MONTH(datetime)
+    sql = sql.replace(/\bMONTH\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(MONTH FROM $1)');
+
+    // SYSDATETIMEOFFSET()
+    sql = sql.replace(/\bSYSDATETIMEOFFSET\s*\(\s*\)/gi, 'CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'');
+
+    // YEAR(datetime)
+    sql = sql.replace(/\bYEAR\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(YEAR FROM $1)');
+
+    return sql;
+}
+
+function getSecondsInUnit(unit) {
+    const unitToSeconds = {
+        'YEAR': 31536000, // Approximate
+        'MONTH': 2592000, // Approximate
+        'DAY': 86400,
+        'HOUR': 3600,
+        'MINUTE': 60,
+        'SECOND': 1
+    };
+    return unitToSeconds[unit.toUpperCase()] || 1;
+}
 
 function handleFunctionsAndStoredProcedures(sql) {
     // Example: Handling SQL Server to PostgreSQL function conversion
@@ -258,3 +365,5 @@ function handleFunctionsAndStoredProcedures(sql) {
     return sql;
 }
 
+console.log(handleDateTimeFunctions(`SELECT DATEADD(day, 1, GETDATE());`));
+// console.log(convertSql(`SELECT CONVERT(DATETIME, '12/28/2022 11:13:31', 110);`));
