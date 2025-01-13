@@ -76,10 +76,10 @@ function handleIdentifiers(sql) {
 function handleLanguageElements(sql) {
     // Convert single-quoted aliases to double-quoted aliases
     sql = sql.replace(/\bAS\s+'([^']+)'/gi, 'AS "$1"');
-    sql = sql.replace(/(\w+)\s+'([^']+)'/gi, '$1 AS "$2"');
+    //sql = sql.replace(/(\w+)\s+'([^']+)'/gi, '$1 AS "$2"');
 
     // Convert single-quoted aliases without AS keyword to double-quoted aliases
-    sql = sql.replace(/(\w+)\s+'([^']+)'/gi, '$1 AS "$2"');
+    // sql = sql.replace(/(\w+)\s+'([^']+)'/gi, '$1 AS "$2"');
 
     // Convert single-quoted strings followed by single-quoted aliases without AS keyword
     sql = sql.replace(/'([^']+)' '([^']+)'/gi, "'$1' \"$2\"");
@@ -172,6 +172,16 @@ function handleBuiltInFunctions(sql) {
 
     // Call the date/time functions handler
     sql = handleDateTimeFunctions(sql);
+
+    // Call the numeric functions handler
+    sql = handleNumericFunctions(sql);
+
+    // Call the null functions handler
+    sql = handleNullFunctions(sql);
+
+    // Call the logical functions handler
+    sql = handleLogicalFunctions(sql);
+
     // Future: Call other categories of built-in functions handlers here (e.g., date functions, aggregate functions)
 
     return sql;
@@ -302,10 +312,28 @@ function handleDateTimeFunctions(sql) {
     // DATENAME(unit, datetime)
     sql = sql.replace(/\bDATENAME\s*\(\s*(\w+)\s*,\s*(.*?)\s*\)/gi, (match, unit, datetime) => {
         const unitMapping = {
-            'YEAR': 'YYYY', 'MONTH': 'Month', 'DAY': 'DD',
-            'HOUR': 'HH24', 'MINUTE': 'MI', 'SECOND': 'SS'
+            'year': 'YYYY',
+            'yy': 'YYYY',
+            'quarter': 'Q',
+            'qq': 'Q',
+            'month': 'Month',
+            'mm': 'Month',
+            'week': 'WW',
+            'wk': 'WW',
+            'day': 'Day',
+            'dd': 'Day',
+            'weekday': 'Day',
+            'dw': 'Day',
+            'hour': 'HH24',
+            'hh': 'HH24',
+            'minute': 'MI',
+            'mi': 'MI',
+            'second': 'SS',
+            'ss': 'SS',
+            'millisecond': 'MS',
+            'ms': 'MS'
         };
-        return `TO_CHAR(${datetime}, '${unitMapping[unit.toUpperCase()] || unit}')`;
+        return `TO_CHAR(${datetime}, '${unitMapping[unit] || unit}')`;
     });
 
     // DATEPART(unit, datetime)
@@ -318,19 +346,52 @@ function handleDateTimeFunctions(sql) {
     });
 
     // DAY(datetime)
-    sql = sql.replace(/\bDAY\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(DAY FROM $1)');
+    sql = sql.replace(/\bDAY\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(DAY FROM DATE $1)');
 
     // GETDATE()
     sql = sql.replace(/\bGETDATE\s*\(\s*\)/gi, 'NOW()');
 
     // MONTH(datetime)
-    sql = sql.replace(/\bMONTH\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(MONTH FROM $1)');
+    sql = sql.replace(/\bMONTH\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(MONTH FROM DATE $1)');
 
     // SYSDATETIMEOFFSET()
-    sql = sql.replace(/\bSYSDATETIMEOFFSET\s*\(\s*\)/gi, 'CURRENT_TIMESTAMP AT TIME ZONE \'UTC\'');
+    sql = sql.replace(/\bSYSDATETIMEOFFSET\s*\(\s*\)/gi, 'NOW()');
 
     // YEAR(datetime)
-    sql = sql.replace(/\bYEAR\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(YEAR FROM $1)');
+    sql = sql.replace(/\bYEAR\s*\(\s*(.*?)\s*\)/gi, 'EXTRACT(YEAR FROM DATE $1)');
+
+    return sql;
+}
+
+function handleNumericFunctions(sql) {
+    // ROUND with truncation
+    sql = sql.replace(/\bROUND\s*\(\s*(.*?),\s*(\d+),\s*(\d+)\s*\)/gi, (match, exp, len, trunc) => {
+        if (trunc === '1') {
+            return `TRUNC(${exp}, ${len})`;
+        } else {
+            return `ROUND(${exp}, ${len})`;
+        }
+    });
+
+    // ROUND without truncation
+    sql = sql.replace(/\bROUND\s*\(\s*(.*?),\s*(\d+)\s*\)/gi, 'ROUND($1, $2)');
+
+    return sql;
+}
+
+function handleNullFunctions(sql) {
+    // ISNULL
+    sql = sql.replace(/\bISNULL\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'COALESCE($1, $2)');
+
+    // NULLIF
+    sql = sql.replace(/\bNULLIF\s*\(\s*(.*?),\s*(.*?)\s*\)/gi, 'NULLIF($1, $2)');
+
+    return sql;
+}
+
+function handleLogicalFunctions(sql) {
+    // IIF
+    sql = sql.replace(/\bIIF\s*\(\s*(.*?),\s*(.*?),\s*(.*?)\s*\)/gi, 'CASE WHEN $1 THEN $2 ELSE $3 END');
 
     return sql;
 }
